@@ -2,6 +2,25 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import App from '../App.vue'
 
+// LocalStorageのモック
+const localStorageMock = {
+  store: {},
+  getItem(key) {
+    return this.store[key] || null
+  },
+  setItem(key, value) {
+    this.store[key] = String(value)
+  },
+  removeItem(key) {
+    delete this.store[key]
+  },
+  clear() {
+    this.store = {}
+  }
+}
+
+global.localStorage = localStorageMock
+
 describe('App.vue', () => {
   let wrapper
 
@@ -56,6 +75,17 @@ describe('App.vue', () => {
       expect(wrapper.vm.newTodoText).toBe('')
       expect(wrapper.vm.newTodoPriority).toBe('medium')
     })
+
+    it('Enterキーで新しいTODOを追加できる', async () => {
+      const input = wrapper.find('.todo-input')
+
+      await input.setValue('Enterキーテスト')
+      await input.trigger('keyup.enter')
+
+      expect(wrapper.vm.todos).toHaveLength(1)
+      expect(wrapper.vm.todos[0].text).toBe('Enterキーテスト')
+      expect(wrapper.vm.newTodoText).toBe('')
+    })
   })
 
   describe('TODO削除', () => {
@@ -68,6 +98,18 @@ describe('App.vue', () => {
       wrapper.vm.deleteTodo(1)
 
       expect(wrapper.vm.todos).toHaveLength(0)
+    })
+
+    it('存在しないIDでの削除は何も起きない', async () => {
+      wrapper.vm.todos = [
+        { id: 1, text: 'TODO 1', completed: false, priority: 'medium' }
+      ]
+      const initialLength = wrapper.vm.todos.length
+
+      wrapper.vm.deleteTodo(999999)
+
+      expect(wrapper.vm.todos).toHaveLength(initialLength)
+      expect(wrapper.vm.todos[0].text).toBe('TODO 1')
     })
   })
 
@@ -82,6 +124,17 @@ describe('App.vue', () => {
       expect(wrapper.vm.todos[0].completed).toBe(true)
 
       wrapper.vm.toggleComplete(1)
+      expect(wrapper.vm.todos[0].completed).toBe(false)
+    })
+
+    it('存在しないIDでの完了切り替えは何も起きない', async () => {
+      wrapper.vm.todos = [
+        { id: 1, text: 'TODO 1', completed: false, priority: 'medium' }
+      ]
+      await wrapper.vm.$nextTick()
+
+      wrapper.vm.toggleComplete(999999)
+
       expect(wrapper.vm.todos[0].completed).toBe(false)
     })
   })
@@ -117,6 +170,69 @@ describe('App.vue', () => {
       expect(wrapper.vm.todos[0].text).toBe('TODO 1')
       expect(wrapper.vm.editingId).toBe(null)
     })
+
+    it('存在しないIDでの更新は何も起きない', async () => {
+      wrapper.vm.todos = [
+        { id: 1, text: 'TODO 1', completed: false, priority: 'medium' }
+      ]
+      await wrapper.vm.$nextTick()
+
+      wrapper.vm.editingId = 999999
+      wrapper.vm.editingText = '変更後のテキスト'
+      wrapper.vm.updateTodo(999999)
+
+      expect(wrapper.vm.todos[0].text).toBe('TODO 1')
+      expect(wrapper.vm.editingId).toBe(null)
+    })
+
+    it('編集をキャンセルできる', async () => {
+      wrapper.vm.todos = [
+        { id: 1, text: '元のテキスト', completed: false, priority: 'medium' }
+      ]
+      await wrapper.vm.$nextTick()
+
+      wrapper.vm.editTodo(wrapper.vm.todos[0])
+      wrapper.vm.editingText = '変更後のテキスト'
+      wrapper.vm.cancelEdit()
+
+      expect(wrapper.vm.todos[0].text).toBe('元のテキスト')
+      expect(wrapper.vm.editingId).toBe(null)
+      expect(wrapper.vm.editingText).toBe('')
+    })
+
+    it('編集中にEnterキーで更新できる', async () => {
+      wrapper.vm.todos = [
+        { id: 1, text: '元のテキスト', completed: false, priority: 'medium' }
+      ]
+      await wrapper.vm.$nextTick()
+
+      wrapper.vm.editTodo(wrapper.vm.todos[0])
+      await wrapper.vm.$nextTick()
+
+      const editInput = wrapper.find('.edit-input')
+      await editInput.setValue('Enterキーで更新')
+      await editInput.trigger('keyup.enter')
+
+      expect(wrapper.vm.todos[0].text).toBe('Enterキーで更新')
+      expect(wrapper.vm.editingId).toBe(null)
+    })
+
+    it('編集中にEscキーでキャンセルできる', async () => {
+      wrapper.vm.todos = [
+        { id: 1, text: '元のテキスト', completed: false, priority: 'medium' }
+      ]
+      await wrapper.vm.$nextTick()
+
+      wrapper.vm.editTodo(wrapper.vm.todos[0])
+      await wrapper.vm.$nextTick()
+
+      const editInput = wrapper.find('.edit-input')
+      await editInput.setValue('変更後のテキスト')
+      await editInput.trigger('keyup.esc')
+
+      expect(wrapper.vm.todos[0].text).toBe('元のテキスト')
+      expect(wrapper.vm.editingId).toBe(null)
+    })
   })
 
   describe('優先度設定', () => {
@@ -129,6 +245,17 @@ describe('App.vue', () => {
       wrapper.vm.setPriority(1, 'high')
 
       expect(wrapper.vm.todos[0].priority).toBe('high')
+    })
+
+    it('存在しないIDでの優先度設定は何も起きない', async () => {
+      wrapper.vm.todos = [
+        { id: 1, text: 'TODO 1', completed: false, priority: 'medium' }
+      ]
+      await wrapper.vm.$nextTick()
+
+      wrapper.vm.setPriority(999999, 'high')
+
+      expect(wrapper.vm.todos[0].priority).toBe('medium')
     })
   })
 
@@ -185,7 +312,7 @@ describe('App.vue', () => {
 
   describe('LocalStorage連携', () => {
     it('TODOをLocalStorageに保存できる', () => {
-      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+      const setItemSpy = vi.spyOn(localStorage, 'setItem')
 
       wrapper.vm.todos = [
         { id: 1, text: 'TODO 1', completed: false, priority: 'medium' }
@@ -193,6 +320,7 @@ describe('App.vue', () => {
       wrapper.vm.saveToLocalStorage()
 
       expect(setItemSpy).toHaveBeenCalledWith('todos', JSON.stringify(wrapper.vm.todos))
+      setItemSpy.mockRestore()
     })
 
     it('LocalStorageからTODOを読み込める', () => {
@@ -224,6 +352,13 @@ describe('App.vue', () => {
       expect(wrapper.vm.priorityLabel('high')).toBe('高')
       expect(wrapper.vm.priorityLabel('medium')).toBe('中')
       expect(wrapper.vm.priorityLabel('low')).toBe('低')
+    })
+
+    it('不正な優先度の場合はそのまま返す', () => {
+      expect(wrapper.vm.priorityLabel('unknown')).toBe('unknown')
+      expect(wrapper.vm.priorityLabel('')).toBe('')
+      expect(wrapper.vm.priorityLabel(null)).toBe(null)
+      expect(wrapper.vm.priorityLabel(undefined)).toBe(undefined)
     })
   })
 })
